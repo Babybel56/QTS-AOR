@@ -1,4 +1,539 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>QTS Assessor Companion</title><style>
-:root{font-family:Inter,ui-sans-serif,system-ui,sans-serif;color:#233246;background:#f4f7fa}*{box-sizing:border-box}body{margin:0}button,input,select,textarea{font:inherit}button{cursor:pointer;border:0;border-radius:9px;padding:10px 14px;background:#143d59;color:white}button.secondary{background:#e8eff5;color:#173b54}button:disabled{opacity:.45}input,select,textarea{width:100%;border:1px solid #cbd7df;border-radius:9px;padding:10px;background:white;color:#233246}textarea{min-height:90px}label{display:block;font-size:13px;font-weight:650;margin:12px 0 5px}header{background:#11364f;color:white;padding:17px 24px;display:flex;justify-content:space-between;gap:12px;align-items:center}header small{display:block;color:#b7d0e0;margin-top:4px}nav{background:white;border-bottom:1px solid #dce5eb;padding:12px 24px;display:flex;gap:8px;flex-wrap:wrap}nav button{background:transparent;color:#4b6576}nav button.active{background:#dcebf3;color:#103e58}main{max-width:1190px;margin:28px auto;padding:0 18px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(245px,1fr));gap:15px}.card{background:white;border:1px solid #e0e8ed;border-radius:15px;padding:20px;box-shadow:0 3px 12px #17384d08}.card h3{margin:0 0 10px}.muted{color:#637887;font-size:13px}.pill{font-size:12px;background:#e9f2f7;border-radius:99px;padding:5px 10px;display:inline-block}.danger{color:#a24736}.good{color:#17684c}.row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.stack{display:grid;gap:12px}.two{display:grid;grid-template-columns:1fr 1fr;gap:18px}.progress{height:9px;background:#e5ecf1;border-radius:12px;overflow:hidden}.progress span{display:block;background:#3a8f87;height:100%}a{color:#176a96}h1{font-size:29px;margin:0 0 6px}h2{font-size:20px;margin:0 0 14px}p{line-height:1.5}.step{border-left:3px solid #9bbac9;padding:8px 0 8px 18px;margin:12px 0}.step.current{border-color:#147e83;background:#f2f8f8}.check{display:flex;gap:10px;align-items:start;margin:11px 0}.check input{width:auto;margin-top:4px}.notice{padding:13px;background:#fff5e8;border:1px solid #f0d8ac;border-radius:10px;margin:14px 0}.empty{padding:25px;text-align:center;color:#687c89}.mini{font-size:12px}.hidden{display:none}details{border-top:1px solid #e4e9ed;padding:12px 0}summary{cursor:pointer;font-weight:650}.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin:15px 0}table{border-collapse:collapse;width:100%}td,th{padding:11px;border-bottom:1px solid #e8edf1;text-align:left;font-size:13px}th{color:#607889} @media(max-width:700px){.two{grid-template-columns:1fr}header{align-items:start;flex-direction:column}}
-</style></head><body><header><div><strong>◈ QTS Assessor Companion</strong><small>University of Sunderland · Assessment Only Route</small></div><div id="identity" class="mini">Not connected</div></header><nav id="nav"></nav><main id="app"></main><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script>
-const STAGES=[{name:'Eligibility & application',desc:'Confirm Sunderland has checked eligibility, qualifications, experience and suitability before admission.',items:['Provider confirms eligibility and entry checks','Experience, age phase and school settings verified by provider','Safeguarding and suitability checks confirmed by provider','Interview arranged or completed'],questions:['What age ranges and school contexts have you taught?','Which current teaching responsibilities demonstrate readiness?']},{name:'Interview & initial evidence',desc:'Review existing teaching practice and the initial evidence base. Follow the provider’s current interview instructions.',items:['Interview record completed','Initial evidence against all standards reviewed','Any gaps documented','Provider authorises progression'],questions:['Which examples best demonstrate impact on pupil learning?','How have you adapted your practice following assessment?']},{name:'Registration & launch',desc:'Record the official assessment start and agree practical arrangements. Do not begin the formal period without provider confirmation.',items:['Provider confirms registration and official start date','School mentor and responsibilities confirmed','Assessment schedule agreed','Candidate understands evidence expectations and safeguarding'],questions:['Who will arrange access to lessons and evidence?','How will candidate and assessor communicate during the period?']},{name:'Practical assessment',desc:'Observe current teaching, verify the evidence, discuss professional judgement and review coverage of the Teachers’ Standards.',items:['Practical teaching assessment recorded','Professional discussions and mentor evidence reviewed','All standards considered using current practice','Any concerns and evidence gaps addressed'],questions:['What did pupils learn and how do you know?','What would you change in this lesson and why?','How do you meet the needs of pupils with SEND and EAL?']},{name:'Final review & QA',desc:'Make evidence-based judgements and prepare provider-required records. The provider controls moderation and final recommendations.',items:['All eight teaching standards reviewed','Part Two professional conduct reviewed','Current practical teaching evidence verified','Provider-required report and moderation completed'],questions:['Is the evidence sufficient, current, authentic and representative?','What remains uncertain or needs verification?']},{name:'Provider outcome & closure',desc:'Record the provider’s official decision and close the case. This app cannot award QTS.',items:['Formal provider outcome recorded','Any follow-up actions communicated','Records archived in line with approved retention policy'],questions:['Has Sunderland confirmed the outcome?','Are all records stored in the approved location?']}];
+let db=null,user=null,profile=null,tab='dashboard',candidates=[],selected=null;
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const standards=[
+'1. Set high expectations',
+'2. Promote good progress and outcomes',
+'3. Demonstrate good subject and curriculum knowledge',
+'4. Plan and teach well-structured lessons',
+'5. Adapt teaching to respond to pupil needs',
+'6. Make accurate and productive use of assessment',
+'7. Manage behaviour effectively',
+'8. Fulfil wider professional responsibilities',
+'Part Two: Personal and professional conduct'
+];
+function connectionScreen(){
+$('nav').innerHTML='';
+$('identity').textContent='Setup required';
+$('app').innerHTML=`
+<div class="card" style="max-width:540px;margin:40px auto">
+<h1>Welcome to QTS Companion</h1>
+<p class="muted">Connect your private assessment workspace.</p>
+<label>Supabase Project URL</label>
+<input id="url" placeholder="https://yourproject.supabase.co">
+<label>Supabase Publishable Key</label>
+<input id="key" placeholder="sb_publishable_...">
+<button style="width:100%;margin-top:18px" onclick="connect()">Connect project</button>
+<p class="muted">Your connection details are saved only in this browser. Never enter a secret or service-role key.</p>
+</div>`;
+}
+async function connect(){
+const url=$('url').value.trim().replace(/\/$/,'');
+const key=$('key').value.trim();
+if(!url.startsWith('https://')||!key){alert('Please enter both connection details.');return;}
+localStorage.setItem('qts_url',url);
+localStorage.setItem('qts_key',key);
+try{
+db=window.supabase.createClient(url,key);
+const {error}=await db.auth.getSession();
+if(error)throw error;
+loginScreen();
+}catch(e){alert('Connection failed: '+e.message);}
+}
+function loginScreen(){
+$('identity').textContent='Workspace connected';
+$('app').innerHTML=`
+<div class="card" style="max-width:440px;margin:40px auto">
+<h1>Assessor sign in</h1>
+<p class="muted">Sign in using your Supabase account.</p>
+<label>Email address</label><input id="email" type="email" placeholder="you@example.com">
+<label>Password</label><input id="password" type="password">
+<button style="width:100%;margin-top:18px" onclick="login()">Sign in</button>
+<p class="muted mini">Candidate accounts use the same secure sign-in system.</p>
+</div>`;
+}
+async function login(){
+try{
+const {data,error}=await db.auth.signInWithPassword({
+email:$('email').value.trim(),password:$('password').value
+});
+if(error)throw error;
+user=data.user;
+await loadProfile();
+}catch(e){alert('Sign-in failed: '+e.message);}
+}
+async function loadProfile(){
+const {data,error}=await db.from('profiles').select('*').eq('id',user.id).single();
+if(error||!data){
+await db.auth.signOut();
+alert('No authorised profile found. Ask your assessor to check your account permissions.');
+return;
+}
+profile=data;
+$('identity').textContent=profile.display_name+' · '+profile.role;
+await loadCandidates();
+render();
+}
+async function loadCandidates(){
+const query=profile.role==='assessor'
+?db.from('candidates').select('*').eq('assessor_id',user.id).order('created_at',{ascending:false})
+:db.from('candidates').select('*').eq('user_id',user.id);
+const {data,error}=await query;
+if(error)throw error;
+candidates=data||[];
+}
+async function logout(){
+await db.auth.signOut();
+user=null;profile=null;candidates=[];
+loginScreen();
+}
+async function boot(){
+const url=localStorage.getItem('qts_url');
+const key=localStorage.getItem('qts_key');
+if(!url||!key){connectionScreen();return;}
+db=window.supabase.createClient(url,key);
+const {data}=await db.auth.getSession();
+if(data.session){user=data.session.user;await loadProfile();}
+else loginScreen();
+}
+let db=null,user=null,profile=null,tab='dashboard',candidates=[],selected=null;
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const standards=[
+'1. Set high expectations',
+'2. Promote good progress and outcomes',
+'3. Demonstrate good subject and curriculum knowledge',
+'4. Plan and teach well-structured lessons',
+'5. Adapt teaching to respond to pupil needs',
+'6. Make accurate and productive use of assessment',
+'7. Manage behaviour effectively',
+'8. Fulfil wider professional responsibilities',
+'Part Two: Personal and professional conduct'
+];
+function connectionScreen(){
+$('nav').innerHTML='';
+$('identity').textContent='Setup required';
+$('app').innerHTML=`
+<div class="card" style="max-width:540px;margin:40px auto">
+<h1>Welcome to QTS Companion</h1>
+<p class="muted">Connect your private assessment workspace.</p>
+<label>Supabase Project URL</label>
+<input id="url" placeholder="https://yourproject.supabase.co">
+<label>Supabase Publishable Key</label>
+<input id="key" placeholder="sb_publishable_...">
+<button style="width:100%;margin-top:18px" onclick="connect()">Connect project</button>
+<p class="muted">Your connection details are saved only in this browser. Never enter a secret or service-role key.</p>
+</div>`;
+}
+async function connect(){
+const url=$('url').value.trim().replace(/\/$/,'');
+const key=$('key').value.trim();
+if(!url.startsWith('https://')||!key){alert('Please enter both connection details.');return;}
+localStorage.setItem('qts_url',url);
+localStorage.setItem('qts_key',key);
+try{
+db=window.supabase.createClient(url,key);
+const {error}=await db.auth.getSession();
+if(error)throw error;
+loginScreen();
+}catch(e){alert('Connection failed: '+e.message);}
+}
+function loginScreen(){
+$('identity').textContent='Workspace connected';
+$('app').innerHTML=`
+<div class="card" style="max-width:440px;margin:40px auto">
+<h1>Assessor sign in</h1>
+<p class="muted">Sign in using your Supabase account.</p>
+<label>Email address</label><input id="email" type="email" placeholder="you@example.com">
+<label>Password</label><input id="password" type="password">
+<button style="width:100%;margin-top:18px" onclick="login()">Sign in</button>
+<p class="muted mini">Candidate accounts use the same secure sign-in system.</p>
+</div>`;
+}
+async function login(){
+try{
+const {data,error}=await db.auth.signInWithPassword({
+email:$('email').value.trim(),password:$('password').value
+});
+if(error)throw error;
+user=data.user;
+await loadProfile();
+}catch(e){alert('Sign-in failed: '+e.message);}
+}
+async function loadProfile(){
+const {data,error}=await db.from('profiles').select('*').eq('id',user.id).single();
+if(error||!data){
+await db.auth.signOut();
+alert('No authorised profile found. Ask your assessor to check your account permissions.');
+return;
+}
+profile=data;
+$('identity').textContent=profile.display_name+' · '+profile.role;
+await loadCandidates();
+render();
+}
+async function loadCandidates(){
+const query=profile.role==='assessor'
+?db.from('candidates').select('*').eq('assessor_id',user.id).order('created_at',{ascending:false})
+:db.from('candidates').select('*').eq('user_id',user.id);
+const {data,error}=await query;
+if(error)throw error;
+candidates=data||[];
+}
+async function logout(){
+await db.auth.signOut();
+user=null;profile=null;candidates=[];
+loginScreen();
+}
+async function boot(){
+const url=localStorage.getItem('qts_url');
+const key=localStorage.getItem('qts_key');
+if(!url||!key){connectionScreen();return;}
+db=window.supabase.createClient(url,key);
+const {data}=await db.auth.getSession();
+if(data.session){user=data.session.user;await loadProfile();}
+else loginScreen();
+}
+function render(){
+const assessor=profile.role==='assessor';
+const tabs=assessor?
+['dashboard','candidates','stages','standards','evidence','observations','resources']:
+['dashboard','stages','standards','evidence','observations','resources'];
+const labels={dashboard:'Overview',candidates:'Candidates',stages:'Assessment journey',standards:'Teachers’ Standards',evidence:'Evidence portfolio',observations:'Observations & meetings',resources:'Resource library'};
+$('nav').innerHTML=tabs.map(t=>`<button class="${tab===t?'active':''}" onclick="tab='${t}';render()">${labels[t]}</button>`).join('')+
+`<button class="secondary" onclick="logout()">Sign out</button>`;
+if(!selected&&candidates.length)selected=candidates[0].id;
+if(!assessor&&candidates.length)selected=candidates[0].id;
+$('app').innerHTML=`
+<div class="row" style="margin-bottom:22px">
+<div><h1>${labels[tab]}</h1><p class="muted">Welcome, ${esc(profile.display_name)}. Your QTS assessment workspace.</p></div>
+${assessor?'<button onclick="newCandidate()">+ Add candidate</button>':''}
+</div><div id="content"></div>`;
+const area=$('content');
+if(tab==='dashboard')dashboard(area);
+if(tab==='candidates')candidateList(area);
+if(tab==='stages')stagePage(area);
+if(tab==='standards')standardsPage(area);
+if(tab==='evidence')evidencePage(area);
+if(tab==='observations')recordsPage(area);
+if(tab==='resources')resourcePage(area);
+}
+function dashboard(el){
+const c=candidates.find(x=>x.id===selected);
+el.innerHTML=`
+<div class="grid">
+<div class="card"><div class="muted">My candidates</div><h1>${candidates.length}</h1><p class="muted">Assigned assessment records</p></div>
+<div class="card"><div class="muted">Current assessment</div><h2>${c?esc(c.name):'No candidate selected'}</h2><p class="muted">${c?esc(STAGES[c.stage]?.name||'Not started'):'Create or await an assignment'}</p></div>
+<div class="card"><div class="muted">Assessment stages</div><h1>${c?(c.stage+1):0}/6</h1><p class="muted">Stages in the guided journey</p></div>
+</div>
+<div class="grid" style="margin-top:18px">
+<div class="card">
+<h2>Continue assessment</h2>
+${c?`<p>${esc(c.name)} · ${esc(c.school||'School not entered')}</p>
+<div class="progress"><span style="width:${(c.stage+1)/6*100}%"></span></div>
+<button style="margin-top:15px" onclick="tab='stages';render()">Open assessment journey</button>`:'<p class="muted">No assessment has been assigned yet.</p>'}
+</div>
+<div class="card">
+<h2>Important reminders</h2>
+<p class="muted">Check the provider-authorised assessment dates, outstanding evidence and all Teachers’ Standards regularly.</p>
+<p class="muted">The application supports your professional judgement; it does not award QTS or replace Sunderland procedures.</p>
+</div>
+</div>
+<div class="card" style="margin-top:18px">
+<h2>Assessment activity</h2>
+${candidates.length?candidates.map(x=>`<div class="step"><strong>${esc(x.name)}</strong><p class="muted">${esc(STAGES[x.stage]?.name||'Not started')} · ${esc(x.school||'School not entered')}</p></div>`).join(''):'<div class="empty">No candidates have been added yet.</div>'}
+</div>`;
+}
+function candidateList(el){
+if(profile.role!=='assessor'){el.innerHTML='<div class="empty">Candidate access is restricted.</div>';return;}
+el.innerHTML=`
+<div class="card">
+<h2>Your candidates</h2>
+${candidates.length?`<table><thead><tr><th>Name</th><th>School</th><th>Stage</th><th></th></tr></thead><tbody>
+${candidates.map(c=>`<tr><td>${esc(c.name)}</td><td>${esc(c.school||'—')}</td><td>${esc(STAGES[c.stage]?.name||'Not started')}</td><td><button class="secondary" onclick="selected='${c.id}';tab='stages';render()">Open</button></td></tr>`).join('')}
+</tbody></table>`:'<div class="empty">No candidates yet. Select Add candidate to begin.</div>'}
+</div>`;
+}
+async function newCandidate(){
+if(profile.role!=='assessor')return;
+const name=prompt('Candidate full name:');
+if(!name?.trim())return;
+const email=prompt('Candidate email address (optional):')||'';
+const school=prompt('School name (optional):')||'';
+const {data,error}=await db.from('candidates').insert({
+assessor_id:user.id,name:name.trim(),email,school
+}).select().single();
+if(error){alert('Could not create candidate: '+error.message);return;}
+candidates.unshift(data);selected=data.id;tab='stages';render();
+}
+function stagePage(el){
+const c=candidates.find(x=>x.id===selected);
+if(!c){el.innerHTML='<div class="empty">No candidate selected.</div>';return;}
+const s=STAGES[c.stage];
+el.innerHTML=`
+<div class="card">
+<div class="row"><span class="pill">Stage ${c.stage+1} of 6</span><span class="muted">${esc(c.name)}</span></div>
+<h2 style="margin-top:15px">${esc(s.name)}</h2>
+<p>${esc(s.desc)}</p>
+<div class="notice">Always follow the current Sunderland assessor instructions. This walkthrough is a working aid, not a substitute for formal provider requirements.</div>
+<h3>Stage checklist</h3>
+<div id="tasks" class="stack"><p class="muted">Loading checklist...</p></div>
+<h3 style="margin-top:25px">Suggested discussion questions</h3>
+${s.questions.map(q=>`<div class="step">${esc(q)}</div>`).join('')}
+<div class="toolbar">
+${c.stage>0?'<button class="secondary" onclick="changeStage(-1)">Previous stage</button>':''}
+${c.stage<5?'<button onclick="changeStage(1)">Next stage</button>':''}
+</div>
+</div>`;
+loadTasks(c.id);
+}
+async function loadTasks(cid){
+const el=$('tasks');if(!el)return;
+const stage=candidates.find(x=>x.id===cid).stage;
+const {data,error}=await db.from('tasks').select('*').eq('candidate_id',cid).eq('stage',stage);
+if(error){el.innerHTML='<p class="danger">Could not load tasks: '+esc(error.message)+'</p>';return;}
+let items=data||[];
+if(!items.length){
+const rows=STAGES[stage].items.map(title=>({candidate_id:cid,stage,title}));
+const result=await db.from('tasks').insert(rows).select();
+if(result.error){el.innerHTML='<p class="danger">'+esc(result.error.message)+'</p>';return;}
+items=result.data;
+}
+el.innerHTML=items.map(t=>`
+<label class="check">
+<input type="checkbox" ${t.completed?'checked':''} onchange="toggleTask('${t.id}',this.checked)">
+<span>${esc(t.title)}</span>
+</label>`).join('');
+}
+async function toggleTask(id,completed){
+const {error}=await db.from('tasks').update({completed}).eq('id',id);
+if(error)alert(error.message);
+}
+async function changeStage(delta){
+if(profile.role!=='assessor')return;
+const c=candidates.find(x=>x.id===selected);
+const next=Math.max(0,Math.min(5,c.stage+delta));
+if(next>c.stage&&!confirm('Move to the next assessment stage? Check the outstanding requirements and Sunderland authorisation first.'))return;
+const {error}=await db.from('candidates').update({stage:next}).eq('id',c.id);
+if(error){alert(error.message);return;}
+c.stage=next;render();
+}
+function standardsPage(el){
+el.innerHTML=`
+<div class="card">
+<h2>Teachers' Standards tracker</h2>
+<p class="muted">Record your working assessment of each standard. These entries are provisional professional notes, not formal provider decisions.</p>
+<div id="standardList"></div>
+</div>`;
+$('standardList').innerHTML=standards.map((s,i)=>`
+<details><summary>${esc(s)}</summary>
+<label>Evidence and observations</label>
+<textarea id="std${i}" placeholder="Record evidence, examples and impact..."></textarea>
+<label>Working assessment</label>
+<select id="status${i}">
+<option value="not_reviewed">Not yet reviewed</option>
+<option value="evidence_gathering">Evidence gathering</option>
+<option value="evidence_found">Evidence identified</option>
+<option value="gap">Further evidence required</option>
+</select>
+<button class="secondary" onclick="saveStandard(${i})">Save working note</button>
+<p class="muted mini">These notes are stored in this browser in this initial version. Do not use them as the permanent candidate record.</p>
+</details>`).join('');
+}
+function saveStandard(i){
+const c=candidates.find(x=>x.id===selected);
+if(!c)return;
+const key='qts_std_'+c.id+'_'+i;
+localStorage.setItem(key,JSON.stringify({
+notes:$('std'+i).value,
+status:$('status'+i).value
+}));
+alert('Working note saved in this browser.');
+}
+async function evidencePage(el){
+const c=candidates.find(x=>x.id===selected);
+if(!c){el.innerHTML='<div class="empty">No candidate selected.</div>';return;}
+const {data,error}=await db.from('evidence').select('*').eq('candidate_id',c.id).order('created_at',{ascending:false});
+el.innerHTML=`
+<div class="card">
+<h2>Evidence portfolio · ${esc(c.name)}</h2>
+<p class="muted">Upload supporting evidence and map it to a Teachers' Standard.</p>
+<label>Evidence title</label><input id="evtitle" placeholder="e.g. Lesson observation or planning">
+<label>Teachers' Standard</label>
+<select id="evstandard">${standards.map((s,i)=>`<option value="${esc(s)}">${esc(s)}</option>`).join('')}</select>
+<label>Description</label><textarea id="evdesc" placeholder="Describe what this evidence demonstrates..."></textarea>
+<label>Document or image</label><input type="file" id="evfile">
+<button style="margin-top:12px" onclick="uploadEvidence()">Submit evidence</button>
+</div>
+<div class="card" style="margin-top:16px">
+<h2>Submitted evidence</h2>
+<div id="evlist">${error?esc(error.message):'Loading...'}</div>
+</div>`;
+if(!error)showEvidence(data||[]);
+}
+function showEvidence(items){
+const el=$('evlist');if(!el)return;
+el.innerHTML=items.length?items.map(e=>`
+<div class="step">
+<strong>${esc(e.title)}</strong>
+<p class="muted">${esc(e.standard)} · ${esc(e.review_status)}</p>
+<p>${esc(e.description)}</p>
+${e.storage_path?`<button class="secondary" onclick="openEvidence('${esc(e.storage_path)}')">Open document</button>`:''}
+${profile.role==='assessor'?`
+<label>Assessor comment</label>
+<textarea id="comment${e.id}">${esc(e.assessor_comment)}</textarea>
+<select id="review${e.id}">
+<option value="pending" ${e.review_status==='pending'?'selected':''}>Pending review</option>
+<option value="reviewed" ${e.review_status==='reviewed'?'selected':''}>Reviewed</option>
+<option value="needs_more" ${e.review_status==='needs_more'?'selected':''}>Further evidence required</option>
+</select>
+<button class="secondary" onclick="reviewEvidence('${e.id}')">Save review</button>`:''}
+</div>`).join(''):'<p class="empty">No evidence submitted yet.</p>';
+}
+async function uploadEvidence(){
+const c=candidates.find(x=>x.id===selected);
+const file=$('evfile').files[0];
+const title=$('evtitle').value.trim();
+if(!title){alert('Please enter an evidence title.');return;}
+let path=null;
+if(file){
+path=c.id+'/'+crypto.randomUUID()+'-'+file.name.replace(/[^a-zA-Z0-9._-]/g,'_');
+const {error}=await db.storage.from('qts-evidence').upload(path,file);
+if(error){alert('Upload failed: '+error.message);return;}
+}
+const {error}=await db.from('evidence').insert({
+candidate_id:c.id,owner_id:user.id,title,
+standard:$('evstandard').value,
+description:$('evdesc').value,
+storage_path:path
+});
+if(error){alert('Record failed: '+error.message);return;}
+alert('Evidence submitted.');
+evidencePage($('content'));
+}
+async function openEvidence(path){
+const {data,error}=await db.storage.from('qts-evidence').createSignedUrl(path,120);
+if(error){alert(error.message);return;}
+window.open(data.signedUrl,'_blank','noopener');
+}
+async function reviewEvidence(id){
+const {error}=await db.from('evidence').update({
+assessor_comment:$('comment'+id).value,
+review_status:$('review'+id).value
+}).eq('id',id);
+if(error)alert(error.message);else alert('Review saved.');
+}
+async function recordsPage(el){
+const c=candidates.find(x=>x.id===selected);
+if(!c){el.innerHTML='<div class="empty">No candidate selected.</div>';return;}
+const assessor=profile.role==='assessor';
+const {data,error}=await db.from('records').select('*')
+.eq('candidate_id',c.id).order('happened_on',{ascending:false});
+el.innerHTML=`
+<div class="card">
+<h2>Observations & professional discussions</h2>
+<p class="muted">${esc(c.name)} · Record teaching observations, meetings and feedback.</p>
+<label>Record type</label>
+<select id="rectype">
+<option value="lesson_observation">Lesson observation</option>
+<option value="professional_discussion">Professional discussion</option>
+<option value="mentor_meeting">Mentor meeting</option>
+<option value="progress_review">Progress review</option>
+<option value="other">Other</option>
+</select>
+<label>Date</label><input type="date" id="recdate" value="${new Date().toISOString().slice(0,10)}">
+<label>Title</label><input id="rectitle" placeholder="e.g. Year 8 Biology observation">
+<label>Notes and professional reflections</label>
+<textarea id="recnotes" placeholder="What happened? What evidence was seen? What was discussed? What are the next steps?"></textarea>
+${assessor?`<label>Visibility</label><select id="recvisibility"><option value="assessor">Assessor only</option><option value="shared">Share with candidate</option></select>`:''}
+<button style="margin-top:12px" onclick="saveRecord()">Save record</button>
+</div>
+<div class="card" style="margin-top:16px">
+<h2>Record history</h2>
+<div id="recordlist">${error?esc(error.message):'Loading...'}</div>
+</div>`;
+if(!error)showRecords(data||[]);
+}
+function showRecords(items){
+const el=$('recordlist');if(!el)return;
+el.innerHTML=items.length?items.map(r=>`
+<div class="step">
+<div class="row"><strong>${esc(r.title)}</strong><span class="pill">${esc(r.visibility)}</span></div>
+<p class="muted">${esc(r.type)} · ${esc(r.happened_on||'No date')}</p>
+<p>${esc(r.notes)}</p>
+</div>`).join(''):'<div class="empty">No records yet.</div>';
+}
+async function saveRecord(){
+const title=$('rectitle').value.trim();
+if(!title){alert('Please enter a title.');return;}
+const c=candidates.find(x=>x.id===selected);
+const visibility=profile.role==='assessor'?$('recvisibility').value:'shared';
+const {error}=await db.from('records').insert({
+candidate_id:c.id,
+author_id:user.id,
+type:$('rectype').value,
+happened_on:$('recdate').value||null,
+title,
+notes:$('recnotes').value,
+visibility
+});
+if(error){alert('Could not save record: '+error.message);return;}
+alert('Record saved.');
+recordsPage($('content'));
+}
+function resourcePage(el){
+const resources=[
+{group:'Official assessment requirements',items:[
+['Department for Education — Assessment Only criteria','https://www.gov.uk/government/publications/the-assessment-only-route-to-qts/assessment-only-route-to-qualified-teacher-status-criteria-and-supporting-advice','Official criteria and supporting advice for Assessment Only QTS.'],
+['University of Sunderland — Assessment Only QTS','https://www.sunderland.ac.uk/short-courses-cpd/assessment-only-route-to-qts','Provider information and route overview.'],
+['Department for Education — Teachers’ Standards','https://www.gov.uk/government/publications/teachers-standards','The statutory standards used in the assessment.']
+]},
+{group:'Teaching standards and professional practice',items:[
+['Teachers’ Standards — official publication','https://www.gov.uk/government/publications/teachers-standards','Download and refer to the current official standards.'],
+['Keeping Children Safe in Education','https://www.gov.uk/government/publications/keeping-children-safe-in-education--2','Safeguarding guidance. Check the current edition.'],
+['Initial teacher training and early career framework','https://www.gov.uk/government/publications/initial-teacher-training-itt-core-content-framework','Background on teacher development and professional practice.']
+]},
+{group:'Your Sunderland working library',items:[
+['Assessor handbook','', 'Upload or locate the current provider handbook.'],
+['Observation templates','', 'Use Sunderland-approved observation paperwork.'],
+['Assessment report templates','', 'Use the official provider reporting forms.'],
+['Mentor guidance','', 'Use the provider-issued mentor instructions.']
+]}
+];
+el.innerHTML=`
+<div class="card">
+<h2>QTS Resource Library</h2>
+<p class="muted">Official guidance and working documents for your assessment.</p>
+<div class="notice">Provider-specific documents take precedence over generic working templates. Confirm that all guidance is current before relying on it.</div>
+${resources.map(group=>`
+<h3 style="margin-top:22px">${esc(group.group)}</h3>
+${group.items.map(item=>`
+<div class="step">
+<strong>${esc(item[0])}</strong>
+<p class="muted">${esc(item[2])}</p>
+${item[1]?`<a href="${item[1]}" target="_blank" rel="noopener">Open resource ↗</a>`:'<span class="muted mini">Provider document to be added</span>'}
+</div>`).join('')}
+`).join('')}
+</div>
+<div class="card" style="margin-top:16px">
+<h2>Document storage</h2>
+<p class="muted">Candidate-specific evidence belongs in the Evidence Portfolio. Keep provider-wide reference documents in an approved shared location until a separate resource upload area is configured.</p>
+</div>`;
+}
+
+// AUTHENTICATION AND STARTUP
+
+if(db){
+db.auth.onAuthStateChange((event,session)=>{
+if(event==='SIGNED_OUT'){
+user=null;profile=null;candidates=[];
+loginScreen();
+}
+});
+}
+
+boot().catch(e=>{
+console.error(e);
+$('app').innerHTML='<div class="card"><h2>Startup error</h2><p>'+esc(e.message)+'</p></div>';
+});
+</script></body></html>
